@@ -15,8 +15,8 @@ openlit.init(disable_metrics=True, otlp_endpoint="http://127.0.0.1:4318")
 event_listener = CrewAiCustomListener()
 persistence = InMemoryFlowPersistence()
 
-# @persist(persistence)  # Using InMemoryFlowPersistence instance
-@persist()
+@persist(persistence)  # Using InMemoryFlowPersistence instance
+# @persist()
 class OutputExampleFlow(Flow):
     @start()
     def initialize(self):
@@ -82,12 +82,14 @@ class OutputExampleFlow(Flow):
 def start_flow():
     flow = OutputExampleFlow()
     flow.plot("my_flow_plot")
-    flow_id = flow.state["id"]
+    # flow_id = flow.state["id"]
     while True:
-        output = flow.kickoff(inputs={"id": flow_id})
+        # output = flow.kickoff(inputs={"id": flow_id})
+        output = flow.kickoff()
         if output == "request_user_input":
             user_input = input("You: ").strip() 
             flow.state["user_inputs"].append(user_input)
+            # persistence.save_state(flow_uuid=flow_id, method_name="handle_request_user_input", state_data=flow.state)
             continue
         if output == "request_user_accept":
             user_choice = input("You: ").strip().upper()
