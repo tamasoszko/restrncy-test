@@ -26,7 +26,6 @@ classifiers = [
 ]
 dependencies = [
     "python-dotenv>=0.9.9",
-    "langgraph>=0.6.9",
     "langchain-openai>=0.1.0",
     "langchain-core>=0.2.0",
     "openai-agents[litellm]>=0.3.3",
@@ -34,6 +33,7 @@ dependencies = [
     "openlit>=1.35.5",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
+    "langgraph>=0.6.8",
 ]
 
 [project.scripts]
