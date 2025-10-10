@@ -34,7 +34,6 @@ dependencies = [
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "langgraph>=0.6.8",
-    "dotenv>=0.9.9",
 ]
 
 [project.scripts]
