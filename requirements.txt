@@ -90,6 +90,8 @@ docstring-parser==0.17.0
     # via
     #   anthropic
     #   instructor
+dotenv==0.9.9
+    # via autogen (pyproject.toml)
 durationpy==0.10
     # via kubernetes
 et-xmlfile==2.0.0
@@ -520,6 +522,7 @@ python-dotenv==1.1.1
     # via
     #   autogen (pyproject.toml)
     #   crewai
+    #   dotenv
     #   litellm
     #   pydantic-settings
     #   uvicorn
