@@ -45,7 +45,6 @@ async def joke_generator_tool(topic: str, num_jokes: int = 3) -> str:
 
 # Agents
 
-
 decision_maker_agent = Agent(
     name="decision_maker",
     instructions="You are a decision maker agent. Pick the best joke from the list of jokes. Always provide the reason for your decision as well.",
@@ -63,40 +62,53 @@ worker_agent = Agent(
 
 orchestrator_agent = Agent(
     name="orchestrator",
-    instructions="You are a orchestrator agent. Your overall goal is to generate the best joke about the topic. You are responsible for coordinating the workers and the decision maker. User will provide the topic of the joke and number of jokes to pick the best from. Use tools to coordinate the workers and the decision maker.",
+    instructions=(
+        "You are a orchestrator agent. Your overall goal is to generate the best joke about the topic."
+        "Begin EVERY message with '[Orchestrator]: ' "
+        "You are responsible for coordinating the workers, decision maker and presenter."
+        "You are not generating jokes yourself, you will only coordinate other agents through tools."
+        "You will be provided with the topic of the joke and number of jokes to pick the best from then use the tools to generate the best joke."
+        "When you have the best joke, hand off to the user_chat_agent" 
+        "User may want to change something or want to generate new jokes. Perform the same process again." 
+        ),
     model=model,
-    tools=[joke_generator_tool, decision_maker_agent.as_tool(
-        tool_name="decision_maker",
-        tool_description="Use this tool to pick the best joke from the list of jokes. As well as reason for your decision.",
-    )]
+    tools=[joke_generator_tool, 
+        decision_maker_agent.as_tool(
+            tool_name="decision_maker",
+            tool_description="Use this tool to pick the best joke from the list of jokes. As well as reason for your decision.",
+        ),
+    ],
 )
 
 user_chat_agent = Agent(
     name="user_chat",
-    instructions="You are a user chat agent helping user to generate the best joke about the topic. You need to get information about jokes to be generated. You will neer to get the topic and number of jokes to be generated. When you have these information hand over to the orchestrator agent. First welcome the user and then ask for the topic and number of jokes to be generated.",
+    instructions=(
+        "You are a user chat agent helping user to generate the best joke about the topic."
+        "Begin EVERY message with '[Assistant]: ' "
+        "You have two responsibilities:"
+        "1. You need to get information about jokes to be generated. You will neer to get the topic and number of jokes to be generated. "
+        "2. You present the final result -the best joke and the reasoning- to the user and ask if they are satisfied with the result or wants some changes."
+        "If the use is satisfied, say goodbye and tell them to type 'exit' or 'bye' to end the conversation."
+        "You never generate jokes yourself, you will only talk to the user understand what they and if there is enough information hand over to the orchestrator agent." 
+        "At first welcome the user and then ask for the topic and number of jokes to be generated." 
+    ),
     model=model,
     handoffs=[orchestrator_agent]
 )
     
-
-async def generate_best_joke(input: str) -> str:
-    """
-    Generate the best joke about the topic.
-    """
-    best_joke = await Runner.run(orchestrator_agent, input=input)
-    return best_joke.final_output
 
 async def start_chat_loop() -> str:
     input_items: list[TResponseInputItem] = []
     welcome = False
     while True:
         if welcome:
-            user_input = input(" > ")
+            user_input = input("[User]: ")
             if user_input.strip().lower() in {"exit", "quit", "bye"}:
                 break
             if not user_input:
                 continue
             input_items.append({"role": "user", "content": user_input})
+        orchestrator_agent.handoffs.append(user_chat_agent)
         result = await Runner.run(user_chat_agent, input_items, run_config=RunConfig(tracing_disabled=True))
         if result.final_output is not None:
             if not welcome:
@@ -106,34 +118,14 @@ async def start_chat_loop() -> str:
             # if result.last_agent == orchestrator_agent:
             #     break
 
-def test_function(input: str) -> str:
-    """
-    Test function that prints a simple message
-    """
-
-    agent = Agent(
-        name="test_agent",
-        instructions="You are helpful assistant." ,
-        tools=[],
-        model=model,
-   )
-    result  = Runner.run_sync(agent, input=input)
-    return result.final_output
-
-
 async def main():
     """
     Main function - entry point of the program
     """
-    print("Starting main program...")
-    
-    # Call the test function
-    # result = await generate_best_joke("Give the best from five about the dogs.")
-    # print(result)
+    print("Starting main program...")    
     result = await start_chat_loop()
     print(result)
 
-    # await run_demo_loop(user_chat_agent)
 
     print("Main program completed successfully!")
 
