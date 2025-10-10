@@ -4,12 +4,13 @@ Simple FastAPI REST API server
 """
 
 import os
-import dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
-dotenv.load_dotenv()
+
+# import dotenv
+# dotenv.load_dotenv()
 
 HOST = os.getenv("API_SERVER_HOST", "0.0.0.0")
 PORT = os.getenv("API_SERVER_PORT", 8000)
