@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
+from crewai_flow import OutputExampleFlow
+
 
 # import dotenv
 # dotenv.load_dotenv()
@@ -18,6 +20,8 @@ PORT = os.getenv("API_SERVER_PORT", 8000)
 # Create FastAPI app
 app = FastAPI(title="Simple API", version="1.0.0")
 
+
+
 # Request model for hello endpoint
 class HelloRequest(BaseModel):
     username: str
@@ -25,6 +29,14 @@ class HelloRequest(BaseModel):
 # Response model for hello endpoint
 class HelloResponse(BaseModel):
     message: str
+
+class ChatMessage(BaseModel):
+    session_id: str | None = None
+    message: str
+
+class ChatResponse(ChatMessage):
+    finished: bool
+    history: list[dict[str, str]]
 
 @app.get("/health")
 async def health_check():
@@ -35,6 +47,18 @@ async def health_check():
 async def say_hello(request: HelloRequest):
     """Say hello to a user"""
     return HelloResponse(message=f"Hello {request.username.capitalize()}!")
+
+@app.post("/chat/crewai_flow")
+def chat_with_crewai_flow(request: ChatMessage):
+    """Chat with CrewAI Flow"""
+    flow = OutputExampleFlow()
+    session_id, finished, message, history = flow.resume(id=request.session_id, user_input=request.message)
+    return ChatResponse(message=message, session_id=session_id, finished=finished, history=history)
+
+
+
+class ChatRequest(BaseModel):
+    message: str
 
 def main():
     """Main function to run the server"""
