@@ -1,12 +1,19 @@
 
 
 import asyncio
+import os
 from typing import Any, Dict, List, Optional
 
 from crewai import LLM, Agent, Task, Crew
 from crewai.tools import tool
+import dotenv
 from pydantic import BaseModel
 import openlit
+
+dotenv.load_dotenv()
+
+OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 openlit.init(disable_metrics=True, otlp_endpoint="http://127.0.0.1:4318")
 
@@ -31,6 +38,8 @@ class ResultArtifact(BaseModel):
 
 llm = LLM(
     model="gpt-4o",
+    base_url=OPENAI_API_ENDPOINT,
+    api_key=OPENAI_API_KEY,
 )
 
 user_representative_agent = Agent(
