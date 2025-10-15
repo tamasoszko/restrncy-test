@@ -134,7 +134,7 @@ chat_summary_agent = Agent(
 )
 
 # Handoff handlers: User Chat -> Orchestrator
-# remove chat history from and add summary as history
+# remove chat history and add summary as history
 # - call chat_summary_agent to summarize the chat history
 # - save chat history to context
 # - return only the summary as history
@@ -168,7 +168,7 @@ async def on_handoff_orchestrator_to_user_chat(ctx: RunContextWrapper[WorflowCon
 
 
 # Handoff handlers: Orchestrator -> User Chat
-# rebuild the chat history and add the last result as a developer message:
+# rebuild the chat history and add the last result from contextas a developer message:
 # - get the last result from context and format it as a developer message
 # - get the chat history from context and add the developer message to it
 # - return the rebuild chat history as history
