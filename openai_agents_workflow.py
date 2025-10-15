@@ -5,36 +5,35 @@ Main Python file - executable and debuggable
 
 import asyncio
 from typing import Any
-import uuid
-from agents.tracing import Span, util
 import dotenv
 import os
-from agents import Agent, ModelSettings, RunConfig, Runner, TResponseInputItem, Trace, function_tool, set_trace_processors, trace, run_demo_loop
+from agents import Agent, ModelSettings, RunConfig, Runner, TResponseInputItem, Trace, function_tool, set_trace_processors, set_tracing_disabled, trace, run_demo_loop
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.extensions.visualization import draw_graph
-
-from openai_agents_tracing import NoOpTracingProcessor
+import mlflow
 
 
 dotenv.load_dotenv()
 
-import mlflow
 
-mlflow.openai.autolog()
-mlflow.set_tracking_uri("http://localhost:5001")
-mlflow.set_experiment("OpenAI Agent")
+OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME")
+MLFLOW_TRACING_URL = os.getenv("MLFLOW_TRACING_URL")
 
-OPENAI_API_ENDPOINT = os.getenv("OPENAI_GPT4_O_API_ENDPOINT")
-OPENAI_API_KEY = os.getenv("OPENAI_GPT4_O_API_KEY")
-
-
-model = LitellmModel( model="gpt-4o", api_key=OPENAI_API_KEY, base_url=OPENAI_API_ENDPOINT)
-
-
-from agents.tracing.processor_interface import TracingProcessor
+if MLFLOW_TRACING_URL is not None:
+    mlflow.openai.autolog()
+    mlflow.set_tracking_uri(MLFLOW_TRACING_URL)
+    mlflow.set_experiment("OpenAI Agent")
 
 
-set_trace_processors([NoOpTracingProcessor()])
+model = LitellmModel( model=OPENAI_MODEL_NAME, api_key=OPENAI_API_KEY, base_url=OPENAI_API_ENDPOINT)
+
+
+# Disable default tracing
+
+set_tracing_disabled(True)
+
 
 # Tools
 
@@ -139,6 +138,7 @@ async def main():
     Main function - entry point of the program
     """
     print("Starting main program...")  
+    draw_graph(user_chat_agent, "openai_agents_workflow")
 
     with mlflow.start_run(run_name="joke_generator"):
         result = await start_chat_loop()

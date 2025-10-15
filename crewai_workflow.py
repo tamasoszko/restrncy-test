@@ -14,8 +14,12 @@ dotenv.load_dotenv()
 
 OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENLIT_URL = os.getenv("OPENLIT_URL")
 
-openlit.init(disable_metrics=True, otlp_endpoint="http://127.0.0.1:4318")
+if OPENLIT_URL is not None:
+    openlit.init(disable_metrics=True, otlp_endpoint=OPENLIT_URL)
+else:
+    openlit.init(disable_metrics=True)
 
 
 class UserInputs(BaseModel):
