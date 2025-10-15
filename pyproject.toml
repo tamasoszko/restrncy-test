@@ -28,12 +28,13 @@ dependencies = [
     "python-dotenv>=0.9.9",
     "langchain-openai>=0.1.0",
     "langchain-core>=0.2.0",
-    "openai-agents[litellm]>=0.3.3",
+    "openai-agents[litellm,viz]>=0.3.3",
     "crewai>=0.201.1",
     "openlit>=1.35.5",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "langgraph>=0.6.8",
+    "mlflow>=3.4.0",
 ]
 
 [project.scripts]

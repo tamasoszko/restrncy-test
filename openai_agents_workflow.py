@@ -4,16 +4,37 @@ Main Python file - executable and debuggable
 """
 
 import asyncio
+from typing import Any
+import uuid
+from agents.tracing import Span, util
 import dotenv
 import os
-from agents import Agent, ModelSettings, RunConfig, Runner, TResponseInputItem, function_tool, trace, run_demo_loop
+from agents import Agent, ModelSettings, RunConfig, Runner, TResponseInputItem, Trace, function_tool, set_trace_processors, trace, run_demo_loop
 from agents.extensions.models.litellm_model import LitellmModel
+from agents.extensions.visualization import draw_graph
+
+from openai_agents_tracing import NoOpTracingProcessor
+
 
 dotenv.load_dotenv()
 
-OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-model = LitellmModel(model="gpt-4o", api_key=OPENAI_API_KEY, base_url=OPENAI_API_ENDPOINT)
+import mlflow
+
+mlflow.openai.autolog()
+mlflow.set_tracking_uri("http://localhost:5001")
+mlflow.set_experiment("OpenAI Agent")
+
+OPENAI_API_ENDPOINT = os.getenv("OPENAI_GPT4_O_API_ENDPOINT")
+OPENAI_API_KEY = os.getenv("OPENAI_GPT4_O_API_KEY")
+
+
+model = LitellmModel( model="gpt-4o", api_key=OPENAI_API_KEY, base_url=OPENAI_API_ENDPOINT)
+
+
+from agents.tracing.processor_interface import TracingProcessor
+
+
+set_trace_processors([NoOpTracingProcessor()])
 
 # Tools
 
@@ -26,22 +47,22 @@ async def joke_generator_tool(topic: str, num_jokes: int = 3) -> str:
         topic: The topic of the joke
         num_jokes: The number of jokes to generate
     """ 
-    with trace("joke_generator"):
-        runs = []
-        for i in range(num_jokes):
-            agent = worker_agent.clone(
-                name=f"worker_{i}",
-            )
-            runs.append(Runner.run(agent, input=topic))
-        joke_results = await asyncio.gather(*runs)
-        jokes = "\n----------\n".join([joke.final_output for joke in joke_results])
-        print("All jokes: \n\n")
-        for i, joke in enumerate(joke_results):
-            print(f"{i+1}: {joke.final_output}\n")
-        print("\n\n")
+    
+    runs = []
+    for i in range(num_jokes):
+        agent = worker_agent.clone(
+            name=f"worker_{i}",
+        )
+        runs.append(Runner.run(agent, input=topic))
+    joke_results = await asyncio.gather(*runs)
+    jokes = "\n----------\n".join([joke.final_output for joke in joke_results])
+    print("All jokes: \n\n")
+    for i, joke in enumerate(joke_results):
+        print(f"{i+1}: {joke.final_output}\n")
+    print("\n\n")
 
 
-        return jokes
+    return jokes
 
 # Agents
 
@@ -99,33 +120,29 @@ user_chat_agent = Agent(
 
 async def start_chat_loop() -> str:
     input_items: list[TResponseInputItem] = []
-    welcome = False
     while True:
-        if welcome:
-            user_input = input("[User]: ")
-            if user_input.strip().lower() in {"exit", "quit", "bye"}:
-                break
-            if not user_input:
-                continue
-            input_items.append({"role": "user", "content": user_input})
+        user_input = input("[User]: ")
+        if user_input.strip().lower() in {"exit", "quit", "bye", "bb", "q"}:
+            break
+        if not user_input:
+            continue
+        input_items.append({"role": "user", "content": user_input})
         orchestrator_agent.handoffs.append(user_chat_agent)
-        result = await Runner.run(user_chat_agent, input_items, run_config=RunConfig(tracing_disabled=True))
+        result = await Runner.run(user_chat_agent, input_items, run_config=RunConfig(tracing_disabled=False))
         if result.final_output is not None:
-            if not welcome:
-                welcome = True
-            input_items.extend(result.to_input_list())
+            input_items = result.to_input_list()
             print(result.final_output)
-            # if result.last_agent == orchestrator_agent:
-            #     break
+
 
 async def main():
     """
     Main function - entry point of the program
     """
-    print("Starting main program...")    
-    result = await start_chat_loop()
-    print(result)
+    print("Starting main program...")  
 
+    with mlflow.start_run(run_name="joke_generator"):
+        result = await start_chat_loop()
+        print(result)
 
     print("Main program completed successfully!")
 
