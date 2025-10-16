@@ -4,18 +4,19 @@ Main Python file - executable and debuggable
 """
 
 import asyncio
+import uuid
 import dotenv
 import os
-from agents import Agent, HandoffInputData, ModelSettings, RunConfig, RunContextWrapper, Runner, TResponseInputItem, function_tool, handoff, set_tracing_disabled
+from agents import Agent, HandoffInputData, ModelSettings, RunConfig, RunContextWrapper, Runner, function_tool, handoff, set_tracing_disabled
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.extensions.visualization import draw_graph
-from litellm import dataclass
 import mlflow
-from pydantic import BaseModel, Field
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 from agents.extensions import handoff_filters
 
+from openai_agents_models import ChatSummaryData, ResultData, WorflowContext
 from openai_agents_utils import LoggerHooks
+from openai_agents_session_manager import SessionManager
 
 dotenv.load_dotenv()
 
@@ -40,29 +41,11 @@ model = LitellmModel( model=OPENAI_MODEL_NAME, api_key=OPENAI_API_KEY, base_url=
 
 set_tracing_disabled(True)
 
-### Data Models
-
-class ChatSummaryData(BaseModel):
-    topic: str = Field(description="The topic of the joke")
-    number_of_jokes: int = Field(description="The number of jokes to generate")
-    best_joke: str | None = Field(description="The latest best joke that was presented to the user previously, optional.")
-    user_feedback_summary: str | None = Field(description="Summarize the user feedback about the latest best joke in regards to the chat context, optional.")
-class ResultData(BaseModel):
-    best_joke: str
-    decision_reason: str
-    all_jokes: list[str]
-
-@dataclass
-class WorflowContext:  
-    name: str
-    chat_history: list[TResponseInputItem]
-    chat_summary: ChatSummaryData | None
-    last_result: ResultData | None
 
 ### Tools
 
 @function_tool
-async def joke_generator_tool(topic: str, num_jokes: int = 3) -> str:
+async def joke_generator_tool(context: RunContextWrapper[WorflowContext], topic: str, num_jokes: int = 3) -> str:
     """
     Joke generator function. Generate a list of jokes about the topic.
 
@@ -73,10 +56,13 @@ async def joke_generator_tool(topic: str, num_jokes: int = 3) -> str:
     
     runs = []
     for i in range(num_jokes):
+        agent_name = f"worker_{i}"
+        session = SessionManager(session_id=context.context.session_id).get_session(agent=agent_name)
         agent = worker_agent.clone(
-            name=f"worker_{i}",
+            name=agent_name,
         )
-        runs.append(Runner.run(agent, input=topic))
+        runs.append(Runner.run(agent, input=topic, session=session))
+
     joke_results = await asyncio.gather(*runs)
     jokes = "\n----------\n".join([joke.final_output for joke in joke_results])
     print("[Trace] All jokes: \n\n")
@@ -134,7 +120,9 @@ user_chat_agent = Agent(
         "Begin EVERY message with '[Assistant]: ' "
         "You have two responsibilities:"
         "1. You need to get information about jokes to be generated. You will need to get the topic and number of jokes to be generated. "
-        "2. You must format and present the result in a user friendly way using markdown: '*Best Joke*: {best_joke}, *Decision Reason*: {decision_reason}', add emojis to the joke to make it more engaging and ask if the user is satisfied with the result or wants some changes."
+        "2. You must format and present the result in a user friendly way using markdown (only these fields will be presented): '*Best Joke*: {best_joke}, *Decision Reason*: {decision_reason}', add emojis to the joke to make it more engaging."
+        "    Ask if the user is satisfied with the result or wants some changes."
+        "    IMPORTANT: Never hand off automatically after this, always check if there was a user input for the last result before handing off. Never hand off if the last message is not from the user."
         "If the use is satisfied, say goodbye and tell them to type 'exit' or 'bye' to end the conversation."
         "You never generate jokes yourself, you will only talk to the user understand what they " 
         "At first welcome the user and then ask for the topic and number of jokes to be generated." 
@@ -176,8 +164,6 @@ async def handoff_filter_user_chat_to_orchestrator(input: HandoffInputData) -> H
         run_context=run_context,
     )
 
-
-
 # Orchestrator -> User Chat
 # rebuild the chat history and add the last result from contextas a developer message:
 # - get the last result from context and format it as a developer message
@@ -208,13 +194,10 @@ async def handoff_filter_orchestrator_to_user_chat(input: HandoffInputData) -> H
         new_items=(),
         run_context=run_context,
     )
-    
+
 
 async def start_chat_loop() -> str:
-    input_items: list[TResponseInputItem] = []
 
-    ctx = WorflowContext(name="user_chat", chat_history=[], last_result=None, chat_summary=None)
-    
     # wire handoff programatically to avoid circular dependency
     user_chat_agent.handoffs.append(handoff(
         agent=orchestrator_agent,
@@ -230,18 +213,22 @@ async def start_chat_loop() -> str:
         on_handoff=on_handoff_orchestrator_to_user_chat,
     ))
 
-    draw_graph(user_chat_agent, "openai_agents_workflow")
+    # draw_graph(user_chat_agent, "openai_agents_workflow")
+
+    session_id = str(uuid.uuid4())
 
     while True:
+        ctx = WorflowContext(session_id=session_id, chat_history=[], last_result=None, chat_summary=None)
+
+        session = SessionManager(session_id=session_id).get_session(agent=user_chat_agent)
+
         user_input = input("[User]: ")
         if user_input.strip().lower() in {"exit", "quit", "bye", "bb", "q"}:
             break
         if not user_input:
             continue
-        input_items.append({"role": "user", "content": user_input})
-        result = await Runner.run(user_chat_agent, input_items, run_config=RunConfig(tracing_disabled=False), context=ctx)
+        result = await Runner.run(user_chat_agent, user_input, run_config=RunConfig(tracing_disabled=False), context=ctx, session=session)
         if result.final_output is not None:
-            input_items = result.to_input_list()
             print(result.final_output)
 
 

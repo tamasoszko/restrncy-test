@@ -3,9 +3,6 @@ from typing import Any
 from agents import Agent, AgentHooks, ModelResponse, RunContextWrapper, TResponseInputItem
 import mlflow
 from mlflow.entities import SpanType
-import mlflow
-from typing import Any
-
 
 def history_item_to_string(item: str | TResponseInputItem) -> str:
 
