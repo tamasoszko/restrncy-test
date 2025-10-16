@@ -1,6 +1,10 @@
 
 from typing import Any
 from agents import Agent, AgentHooks, ModelResponse, RunContextWrapper, TResponseInputItem
+import mlflow
+from mlflow.entities import SpanType
+import mlflow
+from typing import Any
 
 
 def history_item_to_string(item: str | TResponseInputItem) -> str:
@@ -41,6 +45,9 @@ class LoggerHooks(AgentHooks):
 
     async def on_handoff(self, context: RunContextWrapper[None], agent: Agent[None], source: Agent[None]):
         if self.log_on_handoff:
+            with mlflow.start_span(name=f"Handoff_{source.name}_to_{agent.name}", span_type=SpanType.CHAIN) as span:
+                span.set_inputs({"context": str(context.context)})
+
             print(f"[Event] on_handoff: '{source.name}' -> '{agent.name}'")
 
     async def on_llm_start(self, context: RunContextWrapper[None], agent: Agent[None], system_prompt: str, input_items: list[TResponseInputItem]):
