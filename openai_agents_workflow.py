@@ -4,134 +4,20 @@ Main Python file - executable and debuggable
 """
 
 import asyncio
-import random
 import uuid
-import dotenv
-import os
-from agents import Agent, HandoffInputData, ModelSettings, RunConfig, RunContextWrapper, Runner, function_tool, handoff, set_tracing_disabled
-from agents.extensions.models.litellm_model import LitellmModel
-from agents.extensions.visualization import draw_graph
+from agents import HandoffInputData, RunConfig, RunContextWrapper, Runner, handoff
 import mlflow
-from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 from agents.extensions import handoff_filters
 
 from openai_agents_models import ChatSummaryData, ResultData, WorflowContext
-from openai_agents_utils import LoggerHooks
 from openai_agents_session_manager import SessionManager
-
-dotenv.load_dotenv()
-
-
-OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME")
-MLFLOW_TRACING_URL = os.getenv("MLFLOW_TRACING_URL")
+from orchestrator_agent import orchestrator_agent
+from user_chat_agent import user_chat_agent
+from tracing import init_mlflow_tracing
 
 
-if MLFLOW_TRACING_URL is not None:
-    mlflow.openai.autolog()
-    mlflow.set_tracking_uri(MLFLOW_TRACING_URL)
-    mlflow.set_experiment("OpenAI Agent")
-    print(mlflow.__version__)
+init_mlflow_tracing()
 
-
-model = LitellmModel( model=OPENAI_MODEL_NAME, api_key=OPENAI_API_KEY, base_url=OPENAI_API_ENDPOINT)
-
-
-# Disable default tracing
-
-set_tracing_disabled(True)
-
-
-### Tools
-
-@function_tool
-async def restaurant_inquiry_tool(context: RunContextWrapper[WorflowContext], user_request: str) -> str:
-    """
-    Runs inquiry with multiple restaurants in the area.
-
-    Args:
-        user_request: The user request for the restaurant inquiry
-    """ 
-    
-    number_of_restaurants = random.randint(2, 5)
-    runs = []
-    for i in range(number_of_restaurants):
-        agent_name = f"worker_{i}"
-        session = SessionManager(session_id=context.context.session_id).get_session(agent=agent_name)
-        agent = worker_agent.clone(
-            name=agent_name,
-        )
-        runs.append(Runner.run(agent, input=user_request, session=session))
-
-    restaurant_results = await asyncio.gather(*runs)
-    restaurants = "\n----------\n".join([restaurant.final_output for restaurant in restaurant_results])
-    print("[Trace] All restaurants: \n\n")
-    for i, restaurant in enumerate(restaurant_results):
-        print(f"[Trace] {i+1}: {restaurant.final_output}\n")
-    print("[Trace] \n\n")
-
-    return restaurants
-
-
-### Agents
-
-decision_maker_agent = Agent(
-    name="decision_maker",
-    instructions="You are a decision maker agent. Pick the best restaurant from the list of restaurants based on the user request.",
-    model=model 
-)
-
-worker_agent = Agent(
-    name="worker",
-    instructions="You are a restaurant representative agent. You are simulating a real restaurant. Answer the user request about the restaurant. Be creative Find out a restaurant name, rating, cuisine, menu, price range, and other relevant information.",
-    model=model,
-    model_settings=ModelSettings(
-        temperature=0.5
-    ),
-)
-
-orchestrator_agent = Agent(
-    name="orchestrator",
-    instructions=(
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are a orchestrator agent. Your overall goal is to pick the best restaurant based on the user request."
-        "Begin EVERY message with '[Orchestrator]: ' "
-        "You are responsible for coordinating the workers (through restaurant_inquiry_tool), decision maker and chat agent."
-        "You are not generating restaurants information yourself, you will only coordinate other agents through tools."
-        "You will be provided with the user request then use the tools to find the best restaurant."
-        "When you have the best restaurant, hand off to the user_chat_agent" 
-        "If the user may want to change something or run a new search for restaurant information -> perform the same process again." 
-        ),
-    model=model,
-    hooks=LoggerHooks(),
-    tools=[restaurant_inquiry_tool, 
-        decision_maker_agent.as_tool(
-            tool_name="decision_maker",
-            tool_description="Use this tool to pick the best restaurant from the list of restaurants. As well as reason for your decision.",
-        ),
-    ],
-)
-
-user_chat_agent = Agent(
-    name="user_chat",
-    instructions=(
-        f"{RECOMMENDED_PROMPT_PREFIX}\n"
-        "You are a user chat agent helping user to find the best restaurant."
-        "Begin EVERY message with '[Assistant]: ' "
-        "You have two responsibilities:"
-        "1. You need to get information about the user current preferences: type of cuisine and price range"
-        "2. You must format and present the result in a user friendly way using markdown (only these fields will be presented): '*Best Restaurant*: {best_restaurant}, *Decision Reason*: {decision_reason}', add emojis to the restaurant to make it more engaging."
-        "    Ask if the user is satisfied with the result or wants some changes."
-        "    IMPORTANT: Never hand off automatically after this, always check if there was a user input for the last result before handing off. Never hand off if the last message is not from the user."
-        "If the use is satisfied, say goodbye and tell them to type 'exit' or 'bye' to end the conversation."
-        "You never generate restaurants information yourself, you will only talk to the user understand what they want and present the result given to you." 
-        "At first welcome the user and then ask for the type of cuisine and price range." 
-    ),
-    model=model,
-    hooks=LoggerHooks(),
-    tools=[],
-)
 
 # Handoffs
 
@@ -196,48 +82,53 @@ async def handoff_filter_orchestrator_to_user_chat(input: HandoffInputData) -> H
         run_context=run_context,
     )
 
+class RecommenderWorkflow:
+    def __init__(self, session_id: str | None):
+        self.session_id = session_id if session_id is not None else str(uuid.uuid4())
+        self.user_chat_agent = user_chat_agent
 
-async def start_chat_loop() -> str:
 
-    # wire handoff programatically to avoid circular dependency
-    user_chat_agent.handoffs.append(handoff(
-        agent=orchestrator_agent,
-        input_type=ChatSummaryData,
-        input_filter=handoff_filter_user_chat_to_orchestrator,
-        on_handoff=on_handoff_user_chat_to_orchestrator,
-    ))
+    @staticmethod
+    def setup():
+        user_chat_agent.handoffs.append(handoff(
+            agent=orchestrator_agent,
+            input_type=ChatSummaryData,
+            input_filter=handoff_filter_user_chat_to_orchestrator,
+            on_handoff=on_handoff_user_chat_to_orchestrator,
+        ))
 
-    orchestrator_agent.handoffs.append(handoff(
-        agent=user_chat_agent,
-        input_type=ResultData,
-        input_filter=handoff_filter_orchestrator_to_user_chat,
-        on_handoff=on_handoff_orchestrator_to_user_chat,
-    ))
+        orchestrator_agent.handoffs.append(handoff(
+            agent=user_chat_agent,
+            input_type=ResultData,
+            input_filter=handoff_filter_orchestrator_to_user_chat,
+            on_handoff=on_handoff_orchestrator_to_user_chat,
+        ))
 
-    # draw_graph(user_chat_agent, "openai_agents_workflow")
+    async def resume(self, user_input: str) -> tuple[str, str]:
+        ctx = WorflowContext(session_id=self.session_id, chat_history=[], last_result=None, chat_summary=None)
+        session_manager = SessionManager(session_id=self.session_id)
+        session = session_manager.get_session(agent=user_chat_agent)
+        result = await Runner.run(user_chat_agent, user_input, run_config=RunConfig(tracing_disabled=False), context=ctx, session=session)
+        return session_manager.session_id, result.final_output
 
-    session_id = str(uuid.uuid4())
+
+async def start_chat_loop(session_id: str | None = None) -> str:
+
+    workflow = RecommenderWorkflow(session_id=session_id)
 
     while True:
-        ctx = WorflowContext(session_id=session_id, chat_history=[], last_result=None, chat_summary=None)
-
-        session = SessionManager(session_id=session_id).get_session(agent=user_chat_agent)
-
         user_input = input("[User]: ")
         if user_input.strip().lower() in {"exit", "quit", "bye", "bb", "q"}:
             break
-        if not user_input:
-            continue
-        result = await Runner.run(user_chat_agent, user_input, run_config=RunConfig(tracing_disabled=False), context=ctx, session=session)
-        if result.final_output is not None:
-            print(result.final_output)
-
+        result = await workflow.resume(user_input)
+        print(result)
 
 async def main():
     """
     Main function - entry point of the program
     """
     print("[Trace] Starting main program...")  
+    RecommenderWorkflow.setup()
 
     with mlflow.start_run(run_name=f"restaurant_finder"):
         result = await start_chat_loop()

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from crewai_flow import OutputExampleFlow
+from openai_agents_workflow import RecommenderWorkflow
 
 
 # import dotenv
@@ -55,6 +56,14 @@ def chat_with_crewai_flow(request: ChatMessage):
     session_id, finished, message, history = flow.resume(id=request.session_id, user_input=request.message)
     return ChatResponse(message=message, session_id=session_id, finished=finished, history=history)
 
+@app.post("/chat/restrncy")
+async def chat_with_restaurant_finder(request: ChatMessage):
+    """Chat with Restaurant Finder"""
+    flow = RecommenderWorkflow(session_id=request.session_id)
+    session_id, message = await flow.resume(user_input=request.message)
+    # TODO: handle finished and history
+    return ChatResponse(message=message, session_id=session_id, finished=False, history=[])
+
 
 
 class ChatRequest(BaseModel):
@@ -63,6 +72,7 @@ class ChatRequest(BaseModel):
 def main():
     """Main function to run the server"""
     print(f"Starting FastAPI server on {HOST}:{PORT}...")
+    RecommenderWorkflow.setup()
     uvicorn.run(app, host=HOST, port=PORT)
 
 if __name__ == "__main__":
